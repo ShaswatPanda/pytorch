@@ -586,6 +586,23 @@ class TestFunctionalIterDataPipe(TestCase):
 
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
+    def test_fork_datapipe(self):
+        input_dp = IDP(range(10))
+
+        # Case 1
+        dp1, dp2 = input_dp.fork(2)
+        for n1 in dp1:
+            print(n1)
+        print("dp1 is done")
+        for n2 in dp2:
+            print(n2)
+        print("dp2 is done")
+
+        # Case 2
+        dp1, dp2 = input_dp.fork(2)
+        for n1, n2 in zip(dp1, dp2):
+            print(n1, n2)
+
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
 

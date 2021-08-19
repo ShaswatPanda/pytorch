@@ -1,7 +1,8 @@
 import functools
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Iterator, Optional, Sized, Tuple, TypeVar
+from typing import Callable, Iterator, Optional, Sized, Tuple, TypeVar, Deque
+from collections import deque
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -45,6 +46,7 @@ class ConcatIterDataPipe(IterDataPipe):
 # This is fake class to show API, going to be replaced by the copy from torchdata
 # TODO(VitalyFedyunin): Replace with valid version, documentation and tests
 class IterateBuffer(IterDataPipe):
+
     def __init__(self, buffer):
         self.buffer = buffer
 
@@ -55,16 +57,82 @@ class IterateBuffer(IterDataPipe):
 
 @functional_datapipe('fork')
 class ForkIterDataPipe(IterDataPipe):
+    r""" :class:`ForkIterDataPipe`.
 
-    def __new__(cls, datapipe, instances):
-        result = []
-        buffer = list(datapipe)
-        return [IterateBuffer(buffer) for i in range(instances)]
+        Iterable DataPipe to create multiple instances of the same Iterable DataPipe.
+        args:
+            datapipe: Iterable DataPipe being copied
+            num_instances: number of instances of the datapipe to create
+            buffer_size: maxmium buffer size who restricts how far ahead the fastest child datapipe
+             can read relative to the slowest child datapipe
+    """
+    def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+        container = _ForkIterDataPipe(datapipe, num_instances, buffer_size)
+        return [ForkIterDataPipeHelper(container, i) for i in range(num_instances)]
+
+    def __init__(self, *arg):
+        raise Exception("__init__ called instead of __new__")
+
+
+class _ForkIterDataPipe(IterDataPipe):
+
+    def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+        self.main_datapipe = iter(datapipe)
+        self.num_instances = num_instances
+        self.buffer: Deque[T_co] = deque()
+        self.buffer_size = buffer_size
+        self.child_pointers = [0] * num_instances  # Indicate the indices of the next element to get
+        self.slow_ptr = 0
+        self.fast_ptr = 0
+
+    def getNext(self, instance_id) -> T_co:
+        stop = False
+        while not stop:
+            if not self.buffer or self.child_pointers[instance_id] > self.fast_ptr:  # Buffer empty or slower
+                self.fast_ptr = self.child_pointers[instance_id]
+                if self.fast_ptr - self.slow_ptr > self.buffer_size:
+                    raise BufferError(f"ForkIterDataPipe buffer overflow, buffer size {self.buffer_size} is insufficient.")
+                try:
+                    self.buffer.append(self.main_datapipe.__next__())
+                    self.child_pointers[instance_id] += 1
+                    yield self.buffer[-1]
+                except StopIteration:
+                    stop = True
+            else:  # the child pointer is slower than or equal to the fast_ptr
+                buffer_index = self.child_pointers[instance_id] - self.slow_ptr
+                return_val = self.buffer[buffer_index]
+                self.child_pointers[instance_id] += 1
+                if self.child_pointers[instance_id] - 1 == self.slow_ptr:
+                    new_min = min(self.child_pointers)  # Can make this faster if I don't need to call min
+                    if self.slow_ptr < new_min:
+                        self.slow_ptr = new_min
+                        self.buffer.popleft()
+                yield return_val
+
+
+class ForkIterDataPipeHelper(IterDataPipe):
+
+    def __init__(self, main_datapipe: ForkIterDataPipe, instance_id: int):
+        self.main_data_pipe = main_datapipe
+        self.instance_id = instance_id
+
+    def __iter__(self):
+        yield from self.main_data_pipe.getNext(self.instance_id)
 
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
 
+    # given n = num_instances
+    # You want classifier_fn to return (0, ..., n - 1)
+    # Check and make sure the output from classifier_fn is within range [0, n-1]
+    # We are forcing people to return an int
+
+    def __init__(self, datapipe: IterDataPipe[T_co], classifier_fn: Callable[[T_co], int]):
+        self.datapipe = datapipe
+        self.classifier_fn = classifier_fn
+
+    # Placeholder implementation
     def __new__(cls, datapipe, instances, classifier_fn):
         result = []
         buffer = list(datapipe)
