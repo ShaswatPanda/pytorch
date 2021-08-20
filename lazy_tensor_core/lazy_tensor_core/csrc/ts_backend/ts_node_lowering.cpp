@@ -1,5 +1,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 
+#include <ATen/core/Reduction.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/jit.h>
 #include <torch/torch.h>
@@ -21,6 +22,7 @@
 #include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
 #include "lazy_tensor_core/csrc/ops/log_softmax.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
+#include "lazy_tensor_core/csrc/ops/nll_loss_backward.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
@@ -116,6 +118,9 @@ class TSNodeLowering : public NodeLowering {
       }
       case at::aten::native_batch_norm_backward: {
         return InferBatchNormBackward(node);
+      }
+      case at::aten::nll_loss_backward: {
+        return InferNllLossBackward(node);
       }
       case at::aten::permute: {
         auto permute =
@@ -242,6 +247,11 @@ class TSNodeLowering : public NodeLowering {
           ir::NodeCast<ir::ops::TSNativeBatchNormBackward>(
               node, ir::OpKind(at::aten::native_batch_norm_backward)));
     }
+    if (node->op().op == at::aten::nll_loss_backward) {
+      return LowerNllLossBackward(
+          ir::NodeCast<ir::ops::NllLossBackward>(
+              node, ir::OpKind(at::aten::nll_loss_backward)));
+    }
     if (node->op().op == at::aten::constant_pad_nd) {
       return LowerConstantPad(ir::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
@@ -346,6 +356,19 @@ class TSNodeLowering : public NodeLowering {
     const ir::Output& weight = node->operand(2);
     return lazy_tensors::ShapeUtil::MakeTupleShape(
         {input.shape(), weight.shape(), weight.shape()});
+  }
+
+  static lazy_tensors::Shape InferNllLossBackward(const ir::Node* node) {
+    auto& operands = node->operands();
+
+    // TODO(jwtan): Figure out a way to avoid copying the shapes.
+    std::vector<lazy_tensors::Shape> shapes;
+    shapes.reserve(operands.size());
+    for (auto& operand : operands) {
+      shapes.push_back(operand.shape());
+    }
+
+    return lazy_tensors::ShapeUtil::MakeTupleShape(lazy_tensors::MakeSpan(shapes));
   }
 
   static lazy_tensors::Shape InferBmm(const ir::Node* node) {
@@ -569,6 +592,28 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(node->training());
     arguments.emplace_back(node->eps());
     arguments.emplace_back(node->output_mask());
+    return LowerBuiltin(node, arguments);
+  }
+
+  lazy_tensors::int64 GetReduction(ReductionMode reductionMode) {
+    switch (reductionMode) {
+      case ReductionMode::kMean:
+        return at::Reduction::Mean;
+      case ReductionMode::kNone:
+        return at::Reduction::None;
+      case ReductionMode::kSum:
+        return at::Reduction::Sum;
+    }
+    LTC_ERROR() << "Unknown reduction mode: " << static_cast<int64_t>(reductionMode);
+  }
+
+  TSOpVector LowerNllLossBackward(const ir::ops::NllLossBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    for (size_t i = 0; i < 5; ++i) {
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
+    }
+    arguments.emplace_back(GetReduction(node->reduction()));
+    arguments.emplace_back(node->ignore_index());
     return LowerBuiltin(node, arguments);
   }
 
