@@ -1,0 +1,31 @@
+passwords:
+    grafana_admin_username: pytorchgrafanaadmin
+    grafana_admin: "r0fif8HD+f6im4gTdawz"
+
+    github:
+        client_id: 8dad3e30b4bdf0272f6a
+        secret: e5b633182b3e5a10aebf83151f839f4c36709d9d
+
+    es:
+        host: 'https://vpc-gha-logs-7qhzsamnl5qpsyyapor5sgetse.us-east-1.es.amazonaws.com'
+        username: 'pytorchghalogs'
+        password: '8pfrtL3HGlm/bcFe/bwXtg4BJdjc3mwInSUzEvFZ'
+
+    email:
+        to_address: davidriazati@fb.com
+        server: smtp.gmail.com:465
+        user: pytorchmonitoring@gmail.com
+        password: sdyftlsuxqhuhyvf
+
+    mysql:
+        user: pytorchrdsreader
+        password: RJF0phJs4hBVl3zzioSf0E6Oix2PtF5w6rMV7yk
+        host: pytorch-github-data.cysbthvwpk0j.us-east-1.rds.amazonaws.com
+
+    aws:
+        id: AKIAUPVRELQNAGPYZHEG
+        secret: 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
+
+ssl_filenames:
+    key: privkey.pem
+    cert: fullchain.pem

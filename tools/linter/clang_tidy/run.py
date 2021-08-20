@@ -252,6 +252,7 @@ async def _run_clang_tidy(
                 "-config",
                 json.dumps(yaml.load(config, Loader=yaml.SafeLoader)),
             ]
+    base += ["--use-color"]
     if options.print_include_paths:
         base += ["--extra-arg", "-v"]
     if options.include_dir:
